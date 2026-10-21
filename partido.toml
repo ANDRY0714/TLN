@@ -1,0 +1,212 @@
+[partido]
+competicion = "Finalissima"
+resultado = "1 - 0"
+
+[equipos.local]
+id = 1
+nombre = "España"
+apodos = ["La Roja", "La Furia Española", "el combinado español"]
+entrenador = "Luis de la Fuente"
+formacion = "4-2-3-1"
+
+[equipos.visitante]
+id = 2
+nombre = "Argentina"
+apodos = ["La Albiceleste", "La Scaloneta", "el conjunto argentino"]
+entrenador = "Lionel Scaloni"
+formacion = "4-4-2"
+
+--- JUGADORES DE ESPAÑA (LOCAL) ---
+
+[[jugadores]]
+equipo = "local"
+numero = 23
+nombre = "Unai Simón"
+posicion = "portero"
+
+[[jugadores]]
+equipo = "local"
+numero = 12
+nombre = "Pedro Porro"
+posicion = "lateral derecho"
+
+[[jugadores]]
+equipo = "local"
+numero = 22
+nombre = "Pau Cubarsí"
+posicion = "zaguero central"
+socio = 14
+
+[[jugadores]]
+equipo = "local"
+numero = 14
+nombre = "Aymeric Laporte"
+posicion = "zaguero central"
+
+[[jugadores]]
+equipo = "local"
+numero = 24
+nombre = "Marc Cucurella"
+posicion = "lateral izquierdo"
+
+[[jugadores]]
+equipo = "local"
+numero = 16
+nombre = "Rodri"
+posicion = "pivote defensivo"
+capitan = true
+socio = 8
+
+[[jugadores]]
+equipo = "local"
+numero = 8
+nombre = "Fabián Ruiz"
+posicion = "mediocentro"
+
+[[jugadores]]
+equipo = "local"
+numero = 19
+nombre = "Lamine Yamal"
+posicion = "extremo derecho"
+socio = 10
+
+[[jugadores]]
+equipo = "local"
+numero = 10
+nombre = "Dani Olmo"
+posicion = "mediapunta"
+socio = 21
+
+[[jugadores]]
+equipo = "local"
+numero = 15
+nombre = "Álex Baena"
+posicion = "extremo izquierdo"
+
+[[jugadores]]
+equipo = "local"
+numero = 21
+nombre = "Mikel Oyarzabal"
+posicion = "centrodelantero"
+
+--- JUGADORES DE ARGENTINA (VISITANTE) ---
+
+[[jugadores]]
+equipo = "visitante"
+numero = 23
+nombre = "Emiliano Martínez"
+posicion = "portero"
+apodo = "El Dibu"
+
+[[jugadores]]
+equipo = "visitante"
+numero = 4
+nombre = "Gonzalo Montiel"
+posicion = "lateral derecho"
+apodo = "Cachete"
+
+[[jugadores]]
+equipo = "visitante"
+numero = 13
+nombre = "Cristian Romero"
+posicion = "zaguero central"
+apodo = "Cuti"
+socio = 6
+
+[[jugadores]]
+equipo = "visitante"
+numero = 6
+nombre = "Lisandro Martínez"
+posicion = "zaguero central"
+apodo = "Licha"
+
+[[jugadores]]
+equipo = "visitante"
+numero = 3
+nombre = "Nicolás Tagliafico"
+posicion = "lateral izquierdo"
+
+[[jugadores]]
+equipo = "visitante"
+numero = 7
+nombre = "Rodrigo De Paul"
+posicion = "volante derecho"
+apodo = "El Motorcito"
+socio = 10
+
+[[jugadores]]
+equipo = "visitante"
+numero = 24
+nombre = "Enzo Fernández"
+posicion = "mediocentro"
+socio = 20
+
+[[jugadores]]
+equipo = "visitante"
+numero = 20
+nombre = "Alexis Mac Allister"
+posicion = "volante mixto"
+
+[[jugadores]]
+equipo = "visitante"
+numero = 15
+nombre = "Nicolás González"
+posicion = "volante izquierdo"
+
+[[jugadores]]
+equipo = "visitante"
+numero = 10
+nombre = "Lionel Messi"
+posicion = "delantero"
+capitan = true
+apodo = "La Pulga"
+socio = 9
+
+[[jugadores]]
+equipo = "visitante"
+numero = 9
+nombre = "Julián Álvarez"
+posicion = "centrodelantero"
+apodo = "La Araña"
+
+--- RELACIONES EN EL CAMPO ---
+
+[[relaciones]]
+origen = "Lionel Messi"
+relacion = "SOCIO_DE"
+destino = "Julián Álvarez"
+
+[[relaciones]]
+origen = "Rodrigo De Paul"
+relacion = "SOCIO_DE"
+destino = "Lionel Messi"
+
+[[relaciones]]
+origen = "Rodri"
+relacion = "SOCIO_DE"
+destino = "Fabián Ruiz"
+
+[[relaciones]]
+origen = "Lamine Yamal"
+relacion = "SOCIO_DE"
+destino = "Dani Olmo"
+
+[[relaciones]]
+origen = "Nicolás Tagliafico"
+relacion = "RIVAL_DIRECTO_DE"
+destino = "Lamine Yamal"
+
+[[relaciones]]
+origen = "Gonzalo Montiel"
+relacion = "RIVAL_DIRECTO_DE"
+destino = "Álex Baena"
+
+[[relaciones]]
+origen = "Rodri"
+relacion = "RIVAL_DIRECTO_DE"
+destino = "Lionel Messi"
+
+[[relaciones]]
+origen = "Cristian Romero"
+relacion = "RIVAL_DIRECTO_DE"
+destino = "Mikel Oyarzabal"
