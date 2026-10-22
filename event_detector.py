@@ -36,6 +36,7 @@ class DetectorEventos:
     def __init__(self):
         # Estado anterior
         self.ultimo_id_posesion = None
+        self.ultima_etiqueta = None
         self.ultimo_equipo = 0
 
         # Para evitar eventos duplicados
@@ -120,7 +121,16 @@ class DetectorEventos:
         if not estado:
             return None
 
-        id_actual = estado.get("id_posesion")
+        # En primeros planos, repeticiones o planos de grada no hay juego
+        # que analizar: no generamos eventos de posesion.
+        if estado.get("juego_activo") is False:
+            return None
+
+        # Para detectar cambios usamos el id interno estable (uid); el id
+        # visible puede cambiar cuando se reconoce el dorsal y eso generaria
+        # pases falsos.
+        id_actual = estado.get("uid_posesion", estado.get("id_posesion"))
+        etiqueta_actual = estado.get("id_posesion")
         equipo_actual = estado.get("eq_posesion", 0)
         zona = estado.get("zona", "SIN ACCION")
 
@@ -140,7 +150,7 @@ class DetectorEventos:
                     tipo="BALON_LIBRE",
                     equipo=None,
                     jugador=None,
-                    jugador_anterior=self.ultimo_id_posesion,
+                    jugador_anterior=self.ultima_etiqueta,
                     equipo_anterior=self.ultimo_equipo,
                     zona=zona,
                 )
@@ -161,6 +171,7 @@ class DetectorEventos:
         if self.ultimo_id_posesion is None:
 
             self.ultimo_id_posesion = id_actual
+            self.ultima_etiqueta = etiqueta_actual
             self.ultimo_equipo = equipo_actual
 
             if self._puede_generar("POSESION_INICIAL"):
@@ -168,7 +179,7 @@ class DetectorEventos:
                 evento = self._crear_evento(
                     tipo="POSESION_INICIAL",
                     equipo=equipo_actual,
-                    jugador=id_actual,
+                    jugador=etiqueta_actual,
                     zona=zona,
                 )
 
@@ -183,18 +194,20 @@ class DetectorEventos:
         # -----------------------------------------------------
 
         if id_actual == self.ultimo_id_posesion:
-
+            # mismo jugador; actualizamos su etiqueta por si ya se leyo el dorsal
+            self.ultima_etiqueta = etiqueta_actual
             return None
 
         # -----------------------------------------------------
         # A PARTIR DE AQUÍ CAMBIO EL JUGADOR
         # -----------------------------------------------------
 
-        jugador_anterior = self.ultimo_id_posesion
+        jugador_anterior = self.ultima_etiqueta
         equipo_anterior = self.ultimo_equipo
 
         # Actualizamos inmediatamente el estado
         self.ultimo_id_posesion = id_actual
+        self.ultima_etiqueta = etiqueta_actual
         self.ultimo_equipo = equipo_actual
 
         # -----------------------------------------------------
@@ -213,7 +226,7 @@ class DetectorEventos:
             evento = self._crear_evento(
                 tipo="PASE",
                 equipo=equipo_actual,
-                jugador=id_actual,
+                jugador=etiqueta_actual,
                 jugador_anterior=jugador_anterior,
                 equipo_anterior=equipo_anterior,
                 zona=zona,
@@ -240,7 +253,7 @@ class DetectorEventos:
             evento = self._crear_evento(
                 tipo="CAMBIO_POSESION",
                 equipo=equipo_actual,
-                jugador=id_actual,
+                jugador=etiqueta_actual,
                 jugador_anterior=jugador_anterior,
                 equipo_anterior=equipo_anterior,
                 zona=zona,
@@ -262,6 +275,7 @@ class DetectorEventos:
         """
 
         self.ultimo_id_posesion = None
+        self.ultima_etiqueta = None
         self.ultimo_equipo = 0
 
         self.ultimo_tipo_evento = None

@@ -57,7 +57,13 @@ class ReconocedorDorsal:
         intervalo_frames_lectura=2,
         dorsales_validos_por_equipo=None,
         usar_tesseract=False,
+        alto_min_lectura=70,
+        solo_dorsales_de_plantilla=True,
     ):
+        # Altura minima (px) de la caja del jugador para intentar leer el dorsal
+        self.alto_min_lectura = int(alto_min_lectura)
+        # Si hay plantilla cargada (partido.toml), se descartan numeros que no existen
+        self.solo_dorsales_de_plantilla = bool(solo_dorsales_de_plantilla)
         self.min_votos_confirmacion = max(1, int(min_votos_confirmacion))
         self.umbral_confianza = float(umbral_confianza)
         self.intervalo_frames_lectura = max(1, int(intervalo_frames_lectura))
@@ -361,6 +367,14 @@ class ReconocedorDorsal:
             if dorsales_permitidos:
                 if numero in dorsales_permitidos:
                     conf_promedio = min(1.0, conf_promedio + 0.15)
+                elif self.solo_dorsales_de_plantilla:
+                    # El equipo A/B sale del k-means y puede no coincidir con
+                    # local/visitante, asi que se acepta si existe en CUALQUIER
+                    # plantilla (con penalizacion); si no existe, se descarta.
+                    todos = self.dorsales_validos[EQUIPO_A] | self.dorsales_validos[EQUIPO_B]
+                    if numero not in todos:
+                        continue
+                    conf_promedio *= 0.85
                 else:
                     conf_promedio *= 0.75
 
@@ -375,7 +389,10 @@ class ReconocedorDorsal:
 
     def identificar_y_etiquetar_objeto_track(self, frame, tr, dorsales_ocupados=None):
         equipo_id = getattr(tr, "equipo", None)
-        raw_id = getattr(tr, "_raw_track_id", getattr(tr, "track_id", None))
+        # Id interno estable del tracker (no cambia aunque track_id pase a ser el dorsal)
+        raw_id = getattr(tr, "uid", -1)
+        if raw_id is None or raw_id < 0:
+            raw_id = getattr(tr, "_raw_track_id", getattr(tr, "track_id", None))
         setattr(tr, "_raw_track_id", raw_id)
 
         clave = (equipo_id, raw_id)
@@ -386,6 +403,12 @@ class ReconocedorDorsal:
             dorsal_actual is None
             or (self._frames_track[clave] % self.intervalo_frames_lectura == 0)
         )
+
+        # Solo leemos si el jugador se ve suficientemente grande: en cajas
+        # pequenas el numero son 3-4 pixeles y solo genera lecturas falsas.
+        alto_caja = int(getattr(tr, "h", 0) or 0)
+        if alto_caja and alto_caja < self.alto_min_lectura:
+            debe_leer = False
 
         if debe_leer:
             roi_torso = self._extraer_roi_torso(frame, tr)

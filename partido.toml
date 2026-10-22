@@ -16,7 +16,7 @@ apodos = ["La Albiceleste", "La Scaloneta", "el conjunto argentino"]
 entrenador = "Lionel Scaloni"
 formacion = "4-4-2"
 
---- JUGADORES DE ESPAÑA (LOCAL) ---
+# --- JUGADORES DE ESPAÑA (LOCAL) ---
 
 [[jugadores]]
 equipo = "local"
@@ -89,7 +89,7 @@ numero = 21
 nombre = "Mikel Oyarzabal"
 posicion = "centrodelantero"
 
---- JUGADORES DE ARGENTINA (VISITANTE) ---
+# --- JUGADORES DE ARGENTINA (VISITANTE) ---
 
 [[jugadores]]
 equipo = "visitante"
@@ -169,7 +169,7 @@ nombre = "Julián Álvarez"
 posicion = "centrodelantero"
 apodo = "La Araña"
 
---- RELACIONES EN EL CAMPO ---
+# --- RELACIONES EN EL CAMPO ---
 
 [[relaciones]]
 origen = "Lionel Messi"

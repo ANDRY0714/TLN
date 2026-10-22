@@ -1,0 +1,9 @@
+opencv-python
+numpy
+pillow
+ultralytics
+lap
+# opcionales
+imageio-ffmpeg      # extrae el audio si no tienes ffmpeg instalado
+# faster-whisper    # transcripcion del narrador (USAR_TRANSCRIPCION = True en momentos_clave.py)
+# pytesseract       # OCR de dorsales (requiere Tesseract instalado en Windows)

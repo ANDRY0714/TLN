@@ -450,8 +450,17 @@ class RedSemanticaFutbol:
             "categoria_evento": "DISPUTA",
             "intencion_semantica": "disputar la pelota dividida",
         })
+        self.agregar_nodo("GOL", "CONCEPTO", {
+            "categoria_evento": "DEFINICION",
+            "intencion_semantica": "culminar la jugada en el fondo de la red",
+        })
+        self.agregar_nodo("CELEBRACION", "CONCEPTO", {
+            "categoria_evento": "EMOCION",
+            "intencion_semantica": "festejar el gol",
+        })
 
-        for ev_tipo in ("POSESION_INICIAL", "PASE", "CAMBIO_POSESION", "BALON_LIBRE"):
+        for ev_tipo in ("POSESION_INICIAL", "PASE", "CAMBIO_POSESION", "BALON_LIBRE",
+                        "GOL", "CELEBRACION"):
             self.agregar_relacion(ev_tipo, "ES_UN", "EventoJuego")
 
         # Instancias fijas de equipos y balon
@@ -832,6 +841,14 @@ class RedSemanticaFutbol:
             self.eliminar_relaciones_de("Balon", "POSEIDO_POR")
             self.eliminar_relaciones_de("Balon", "CONTROLADO_POR")
 
+        if tipo in ("GOL", "CELEBRACION"):
+            # El gol detiene el juego: el balon deja de tener dueno
+            self.eliminar_relaciones_de("Balon", "POSEIDO_POR")
+            if nodo_jug:
+                self.agregar_relacion("Evento_Actual", "AGENTE", nodo_jug, unica_por_origen=True)
+            if tipo == "GOL" and (nodo_jug or nodo_eq):
+                self.agregar_relacion(nodo_jug or nodo_eq, "ANOTA", "Evento_Actual")
+
         if tipo == "PASE" and nodo_jug_ant and nodo_jug:
             self.agregar_relacion("Evento_Actual", "AGENTE", nodo_jug_ant, unica_por_origen=True)
             self.agregar_relacion("Evento_Actual", "RECEPTOR", nodo_jug, unica_por_origen=True)
@@ -1080,6 +1097,30 @@ class NarradorFutbol:
             "Disputa abierta por <SN_BALON> <COMP_ZONA> tras la intervencion de <SN_JUGADOR_ANT_ROL>.",
             "Sin posesion definida <COMP_ZONA>: <SN_BALON> queda suelto en el terreno.",
         ],
+        "GOL": [
+            "<EXCL_GOL> <SN_JUGADOR_CAP> <SV_GOL> para <SN_EQUIPO> <COMP_MARCADOR>.",
+            "<EXCL_GOL> <SN_EQUIPO_CAP> <SV_GOL_EQ> con el tanto de <SN_JUGADOR> <COMP_MARCADOR>.",
+            "<EXCL_GOL> <SN_JUGADOR_CAP> <SV_GOL> y <SN_EQUIPO> <SV_GOL_EQ> <COMP_MARCADOR>.",
+        ],
+        "GOL_SIN_AUTOR": [
+            "<EXCL_GOL> <SN_EQUIPO_CAP> <SV_GOL_EQ> <COMP_MARCADOR>.",
+            "<EXCL_GOL> <SN_BALON_CAP> termina en el fondo de la red y <SN_EQUIPO> <SV_GOL_EQ> <COMP_MARCADOR>.",
+        ],
+        "GOL_SIN_EQUIPO": [
+            "<EXCL_GOL> <SN_BALON_CAP> termina en el fondo de la red.",
+            "<EXCL_GOL> El remate entra y el estadio explota.",
+        ],
+        "CELEBRACION": [
+            "<SN_JUGADOR_CAP> <SV_CELEB> junto a sus companeros de <SN_EQUIPO>.",
+            "Euforia en <SN_EQUIPO>: <SN_JUGADOR> <SV_CELEB>.",
+        ],
+        "CELEBRACION_SIN_AUTOR": [
+            "Los jugadores de <SN_EQUIPO> <SV_CELEB_PL>.",
+            "Euforia en <SN_EQUIPO>, sus jugadores <SV_CELEB_PL>.",
+        ],
+        "CELEBRACION_SIN_EQUIPO": [
+            "Los jugadores <SV_CELEB_PL> mientras la grada estalla.",
+        ],
         "ESTADO_BALON_POSESION": [
             "<SN_BALON_CAP> sigue con <SN_EQUIPO>, <MOV_BALON> <COMP_ZONA> <FASE_TACTICA>.",
             "<SN_EQUIPO_CAP> conduce <SN_BALON>, que <MOV_BALON> <COMP_ZONA>.",
@@ -1150,6 +1191,33 @@ class NarradorFutbol:
             "anticipa la jugada",
             "corta la trayectoria",
             "interviene con firmeza",
+        ],
+        "EXCL_GOL": [
+            "GOOOOL.",
+            "GOL, GOL, GOL.",
+            "Es gol.",
+            "GOLAZO.",
+        ],
+        "SV_GOL": [
+            "marca",
+            "anota",
+            "la manda al fondo de la red",
+            "define con precision",
+        ],
+        "SV_GOL_EQ": [
+            "celebra el gol",
+            "mueve el marcador",
+            "encuentra el premio",
+        ],
+        "SV_CELEB": [
+            "corre a festejar",
+            "celebra con todo",
+            "grita el gol",
+        ],
+        "SV_CELEB_PL": [
+            "celebran el gol",
+            "corren a festejar juntos",
+            "se funden en un abrazo",
         ],
         "SV_DISPUTA": [
             "queda sin una posesion clara",
@@ -1254,6 +1322,7 @@ class NarradorFutbol:
         )
         self.frases = self.TABLA_ESTRUCTURAL
         self.ultima_inferencia = {}
+        self.goles = {EQUIPO_A: 0, EQUIPO_B: 0}
 
         if archivo_partido is not None:
             self.cargar_archivo_partido(archivo_partido)
@@ -1406,6 +1475,16 @@ class NarradorFutbol:
         if not tipo or tipo not in self.TABLA_ESTRUCTURAL:
             return ""
 
+        # GOL / CELEBRACION pueden no tener autor o equipo identificados
+        plantilla = tipo
+        if tipo in ("GOL", "CELEBRACION"):
+            if evento.get("equipo") not in (EQUIPO_A, EQUIPO_B):
+                plantilla = f"{tipo}_SIN_EQUIPO"
+            elif evento.get("jugador") is None:
+                plantilla = f"{tipo}_SIN_AUTOR"
+        if tipo == "GOL" and evento.get("equipo") in self.goles:
+            self.goles[evento["equipo"]] += 1
+
         inferencia = self.red_semantica.registrar_evento_e_inferir(evento)
         self.ultima_inferencia = inferencia
 
@@ -1470,9 +1549,10 @@ class NarradorFutbol:
             "COMP_ZONA": comp_zona,
             "FASE_TACTICA": inferencia.get("fase_tactica", ""),
             "MATIZ_SEMANTICO": inferencia.get("matiz_semantico", ""),
+            "COMP_MARCADOR": self._comp_marcador(),
         }
 
-        texto = self.motor.reescribir(tipo, contexto)
+        texto = self.motor.reescribir(plantilla, contexto)
         return self._sanear(texto)
 
     # ===================================================
@@ -1508,6 +1588,16 @@ class NarradorFutbol:
         texto = self.motor.reescribir(tipo, contexto)
         return self._sanear(texto)
 
+    def marcador_texto(self):
+        """'Espana 1 - 0 Argentina' (EQUIPO_A = local)."""
+        return (f"{self.nombre_equipo(EQUIPO_A)} {self.goles[EQUIPO_A]} - "
+                f"{self.goles[EQUIPO_B]} {self.nombre_equipo(EQUIPO_B)}")
+
+    def _comp_marcador(self):
+        if not any(self.goles.values()):
+            return ""
+        return f"(marcador {self.goles[EQUIPO_A]}-{self.goles[EQUIPO_B]})"
+
     def obtener_estado_semantico(self):
         """
         Devuelve las tripletas (origen, relacion, destino) activas y la ultima
@@ -1537,3 +1627,4 @@ class NarradorFutbol:
         self.red_semantica.reset()
         self.motor.reset()
         self.ultima_inferencia.clear()
+        self.goles = {EQUIPO_A: 0, EQUIPO_B: 0}

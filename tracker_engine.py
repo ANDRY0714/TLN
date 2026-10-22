@@ -1,6 +1,9 @@
 """
-tracker_engine.py  v4
+tracker_engine.py  v5
 =====================
+- v5: filtro de campo (descarta grada, fotografos y publico), tipo de plano,
+      ids internos estables (uid) aunque el reconocedor cambie track_id por
+      el dorsal, y cajas x/y/w/h reales para el reconocedor de dorsales.
 - El punto sobre cada jugador se pinta con el COLOR REAL de su camiseta
 - ClasificadorEquipo expone centroid_bgr(equipo) para que main.py lo use
 - K-means en espacio Lab, funciona con cualquier color de playera
@@ -14,14 +17,19 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
+from filtro_campo import (FiltroCampo, PLANO_GENERAL, PLANO_MEDIO,
+                          PLANO_PRIMER, PLANO_FUERA)
+
 # ============================================================
 # CONFIG
 # ============================================================
 
 COCO_PERSON = 0
 COCO_BALL   = 32
-MODELO_YOLO = "yolov8n.pt"
+MODELO_YOLO = "yolov8n.pt"   # "yolov8s.pt" detecta mejor si la PC lo aguanta
 CONF_MIN    = 0.30
+IMGSZ       = 640            # 960 ayuda con jugadores lejanos (mas lento)
+FILTRAR_FUERA_DE_CAMPO = True
 
 CANCHA_LARGO_M = 60.0
 CANCHA_ANCHO_M = 40.0
@@ -132,7 +140,9 @@ class ClasificadorEquipo:
 
 @dataclass
 class Track:
-    track_id: int
+    track_id: int                 # etiqueta visible (el reconocedor la cambia por el dorsal)
+    uid: int = -1                 # id interno de ByteTrack, NUNCA cambia
+    dorsal: object = None
     equipo: int = EQUIPO_NA
     cx: float = 0.0
     cy: float = 0.0
@@ -146,6 +156,16 @@ class Track:
     votos_b: int = 0
     dist_total_m: float = 0.0
     vel_actual_kmh: float = 0.0
+
+    # Caja en formato x, y, w, h (la usa jersey_recognizer.py)
+    @property
+    def x(self): return self.x1
+    @property
+    def y(self): return self.y1
+    @property
+    def w(self): return self.x2 - self.x1
+    @property
+    def h(self): return self.y2 - self.y1
 
     def equipo_estable(self):
         if self.votos_a == 0 and self.votos_b == 0:
@@ -187,6 +207,10 @@ class MotorTracking:
         self.m_por_px_y = CANCHA_ANCHO_M / frame_h
 
         self.clf = ClasificadorEquipo()
+        self.campo = FiltroCampo()
+        self.plano = PLANO_GENERAL
+        self.descartados = 0
+        self._etiqueta_posesion = None
 
         self.tracks: dict[int, Track] = {}
         self.balon         = None
@@ -211,11 +235,14 @@ class MotorTracking:
     def procesar_frame(self, frame_bgr):
         t_now = time.time()
 
+        self.campo.procesar(frame_bgr)
+
         res = self.model.track(
             frame_bgr,
             persist=True,
             classes=[COCO_PERSON, COCO_BALL],
             conf=CONF_MIN,
+            imgsz=IMGSZ,
             tracker="bytetrack.yaml",
             verbose=False,
         )
@@ -224,6 +251,7 @@ class MotorTracking:
         ids_vistos = set()
         self.balon = None
         dets_pers  = []
+        self.descartados = 0
 
         if r.boxes is not None and len(r.boxes) > 0:
             for box in r.boxes:
@@ -239,13 +267,18 @@ class MotorTracking:
                 if box.id is None:
                     continue
 
+                # Personas fuera del terreno (grada, fotografos, publico)
+                if FILTRAR_FUERA_DE_CAMPO and not self.campo.persona_en_campo(x1, y1, x2, y2):
+                    self.descartados += 1
+                    continue
+
                 tid = int(box.id[0])
                 ids_vistos.add(tid)
                 dets_pers.append((x1, y1, x2, y2))
 
                 tr = self.tracks.get(tid)
                 if tr is None:
-                    tr = Track(track_id=tid)
+                    tr = Track(track_id=tid, uid=tid)
                     self.tracks[tid] = tr
 
                 if tr.hist:
@@ -265,7 +298,11 @@ class MotorTracking:
                     elif eq == EQUIPO_B: tr.votos_b += 1
                     tr.equipo = tr.equipo_estable()
 
-        if not self.clf.listo():
+        self.plano = self.campo.clasificar_plano(
+            [y2 - y1 for (_, y1, _, y2) in dets_pers], self.frame_h)
+
+        # Solo calibramos colores con planos donde se ve juego
+        if not self.clf.listo() and self.plano in (PLANO_GENERAL, PLANO_MEDIO):
             self.clf.warm_up(frame_bgr, dets_pers)
 
         for tid in list(self.tracks.keys()):
@@ -281,10 +318,15 @@ class MotorTracking:
                 self.balon_vis = None
 
         self._calc_vel()
-        self._actualizar_posesion()
+        # En primeros planos / grada no hay juego que medir: congelamos posesion
+        if self.juego_activo():
+            self._actualizar_posesion()
         self._actualizar_stats()
 
         return self._estado()
+
+    def juego_activo(self):
+        return self.plano in (PLANO_GENERAL, PLANO_MEDIO)
 
     # --------------------------------------------------------
     def _volcar_dist(self, tr):
@@ -327,7 +369,7 @@ class MotorTracking:
             d = ((tr.cx-bx)**2 + (tr.cy-by)**2)**0.5
             if d < mejor_d: mejor_d, mejor_tr = d, tr
 
-        nuevo_id = (mejor_tr.track_id
+        nuevo_id = (mejor_tr.uid
                     if mejor_tr and mejor_d <= radio else None)
 
         if nuevo_id == self.id_posesion:
@@ -413,15 +455,28 @@ class MotorTracking:
         color_a_bgr = self.clf.centroid_bgr(EQUIPO_A)
         color_b_bgr = self.clf.centroid_bgr(EQUIPO_B)
 
+        tr_pos = self.tracks.get(self.id_posesion)
+        if tr_pos is not None:
+            self._etiqueta_posesion = tr_pos.track_id
+        elif self.id_posesion is None:
+            self._etiqueta_posesion = None
         return {
             "tracks":           list(self.tracks.values()),
             "balon":            self.balon_vis,
+            "balon_detectado":  self.balon is not None,
+            "plano":            self.plano,
+            "juego_activo":     self.juego_activo(),
+            "ratio_cesped":     self.campo.ratio_cesped,
+            "ratio_cesped_inf": self.campo.ratio_cesped_inferior,
+            "descartados":      self.descartados,
+            "uid_posesion":     self.id_posesion,
             "count_a":          ca,
             "count_b":          cb,
             "pos_a":            pos_a,
             "pos_b":            pos_b,
             "zona":             self._zona_3x3(),
-            "id_posesion":      self.id_posesion,
+            # etiqueta visible del poseedor (dorsal si ya se reconocio)
+            "id_posesion":      self._etiqueta_posesion,
             "eq_posesion":      self.eq_posesion,
             "pases_a":          self.pases_a,
             "pases_b":          self.pases_b,

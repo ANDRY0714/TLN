@@ -67,6 +67,9 @@ class VideoReader:
         self.frame_actual = 0
 
     def leer_frame(self):
+        if self.pipe.stdout is None:
+            return None
+
         raw = self.pipe.stdout.read(self.frame_size)
 
         if len(raw) != self.frame_size:
