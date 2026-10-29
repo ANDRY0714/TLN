@@ -10,6 +10,9 @@ main.py  v6
 - Filtro de campo (filtro_campo.py): se descartan personas fuera del terreno.
 - Deteccion de GOL y CELEBRACION (momentos_clave.py).
 - Casilla "Ver campo" para depurar: contorno del campo detectado y red.
+- v7: panel lateral mas ancho, letra grande y con barra de desplazamiento;
+      colores de camiseta de partido.toml (EQUIPO_A = local = rojo);
+      voz del narrador (voz.py) con casilla "Voz" para silenciarla.
 """
 
 import time
@@ -25,10 +28,26 @@ from narrator import NarradorFutbol
 from jersey_recognizer import ReconocedorDorsal
 from momentos_clave import DetectorMomentosClave
 from filtro_campo import NOMBRES_PLANO
+from voz import VozNarrador, RELLENO, EVENTO, URGENTE
 
 VIDEO_WIDTH = 960
 VIDEO_HEIGHT = 540
-PANEL_W = 400
+PANEL_W = 580
+WRAP = PANEL_W - 70   # ancho de texto dentro de las tarjetas
+
+# Tipografia del panel de eventos (antes 7-11 pt, no se leia bien)
+F_TITULO = ("Segoe UI", 20, "bold")
+F_MARCADOR = ("Segoe UI", 24, "bold")
+F_SECCION = ("Segoe UI", 13, "bold")
+F_ESTADO = ("Segoe UI", 13)
+F_SENALES = ("Segoe UI", 11)
+F_TEXTO = ("Segoe UI", 16)
+F_EVENTO_TIT = ("Segoe UI", 20, "bold")
+F_EVENTO_TXT = ("Segoe UI", 17)
+F_HIST = ("Segoe UI", 14)
+F_HIST_TIPO = ("Segoe UI", 14, "bold")
+F_HIST_T = ("Consolas", 12)
+F_HIST_MOTIVO = ("Segoe UI", 12, "italic")
 
 # Paleta
 BG = "#0F172A"
@@ -56,6 +75,8 @@ TITULO_EVENTO = {
 }
 
 INTERVALO_NARRACION_BALON_S = 1.5
+SILENCIO_ANTES_DE_RELLENO_S = 4.0   # la voz narra el balon si lleva rato callada
+PRIORIDAD_VOZ = {"GOL": URGENTE, "CELEBRACION": URGENTE, "BALON_LIBRE": RELLENO}
 
 
 def mmss(t):
@@ -69,6 +90,7 @@ class DetectorFutbol:
         self.root.title("PRO - Sistema PRO - Analisis de Futbol con IA")
         self.root.geometry("1600x900")
         self.root.configure(bg=BG)
+        self.root.protocol("WM_DELETE_WINDOW", self.cerrar)
 
         self.cap = None
         self.ruta_video = None
@@ -81,6 +103,8 @@ class DetectorFutbol:
         self.reconocedor_dorsales = ReconocedorDorsal()
         self.reconocedor_dorsales.sincronizar_con_narrador(self.narrador_futbol)
         self.momentos = DetectorMomentosClave()
+        self.voz = VozNarrador()
+        self.colores_equipo = self._colores_camiseta()
 
         self.proc_w = VIDEO_WIDTH
         self.proc_h = VIDEO_HEIGHT
@@ -93,8 +117,26 @@ class DetectorFutbol:
         self._reset_narracion()
 
         self.ver_campo = tk.BooleanVar(value=False)
+        self.voz_activa = tk.BooleanVar(value=True)
         self.panel_activo = "eventos"
         self.crear_ui()
+
+    def _colores_camiseta(self):
+        """{EQUIPO_A: [...], EQUIPO_B: [...]} con la clave 'camiseta' de partido.toml."""
+        red = self.narrador_futbol.red_semantica
+        datos = getattr(red, "_datos_partido_cargados", None) or {}
+        colores = {}
+        for clave, info in (datos.get("equipos") or {}).items():
+            if isinstance(info, dict) and info.get("camiseta"):
+                eq = red._resolver_equipo_id(info.get("id", clave))
+                if eq in (EQUIPO_A, EQUIPO_B):
+                    colores[eq] = info["camiseta"]
+        return colores
+
+    def cerrar(self):
+        self.running = False
+        self.voz.cerrar()
+        self.root.destroy()
 
     def _reset_narracion(self):
         self.historial_eventos = []
@@ -127,6 +169,11 @@ class DetectorFutbol:
                        bg=BG_PANEL, fg=TXT, selectcolor=BG_CARD,
                        activebackground=BG_PANEL, activeforeground=TXT,
                        font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=10)
+        tk.Checkbutton(top, text="Voz", variable=self.voz_activa,
+                       command=lambda: self.voz.set_activa(self.voz_activa.get()),
+                       bg=BG_PANEL, fg=TXT, selectcolor=BG_CARD,
+                       activebackground=BG_PANEL, activeforeground=TXT,
+                       font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=4)
         self.lbl_status = tk.Label(top, text="", bg=BG_PANEL, fg="#FBBF24",
                                    font=("Segoe UI", 10, "bold"))
         self.lbl_status.pack(side=tk.LEFT, padx=12)
@@ -148,9 +195,24 @@ class DetectorFutbol:
         self.video_canvas = tk.Canvas(main, bg="black", highlightthickness=0)
         self.video_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        cont = tk.Frame(main, bg=BG_PANEL, width=PANEL_W)
-        cont.pack(side=tk.RIGHT, fill=tk.Y)
-        cont.pack_propagate(False)
+        # Panel lateral con barra de desplazamiento (el contenido ya no cabe)
+        lateral = tk.Frame(main, bg=BG_PANEL, width=PANEL_W)
+        lateral.pack(side=tk.RIGHT, fill=tk.Y)
+        lateral.pack_propagate(False)
+        barra = tk.Scrollbar(lateral, orient=tk.VERTICAL)
+        barra.pack(side=tk.RIGHT, fill=tk.Y)
+        self.cv_lateral = tk.Canvas(lateral, bg=BG_PANEL, highlightthickness=0,
+                                    yscrollcommand=barra.set)
+        self.cv_lateral.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        barra.config(command=self.cv_lateral.yview)
+        cont = tk.Frame(self.cv_lateral, bg=BG_PANEL)
+        ventana = self.cv_lateral.create_window(0, 0, window=cont, anchor="nw")
+        cont.bind("<Configure>", lambda e: self.cv_lateral.configure(
+            scrollregion=self.cv_lateral.bbox("all")))
+        self.cv_lateral.bind("<Configure>", lambda e: self.cv_lateral.itemconfig(
+            ventana, width=e.width))
+        self.lateral = lateral
+        self.root.bind_all("<MouseWheel>", self._rueda)
 
         self.panel_eventos = tk.Frame(cont, bg=BG_PANEL)
         self.panel_tactico = tk.Frame(cont, bg=BG_PANEL)
@@ -165,87 +227,105 @@ class DetectorFutbol:
                 frame.pack(fill=tk.BOTH, expand=True)
             else:
                 frame.pack_forget()
+        self.cv_lateral.yview_moveto(0)
         for c, b in self.btn_tab.items():
             activo = c == clave
             b.config(bg=ACENTO if activo else BG_CARD,
                      fg="white" if activo else TXT_DIM,
                      activebackground="#1D4ED8" if activo else "#374151")
 
+    def _rueda(self, event):
+        # El historial tiene su propio scroll: ahi la rueda mueve solo el historial
+        w = self.root.winfo_containing(event.x_root, event.y_root)
+        if w is None or w is self.txt_hist or not str(w).startswith(str(self.lateral)):
+            return
+        self.cv_lateral.yview_scroll(int(-event.delta / 120), "units")
+
+    def _nombre(self, equipo):
+        return self.narrador_futbol.nombre_equipo(equipo)
+
     def _sep(self, p):
         tk.Frame(p, bg="#374151", height=1).pack(fill=tk.X, padx=8, pady=3)
 
     def _titulo_seccion(self, p, texto):
         tk.Label(p, text=texto, bg=BG_PANEL, fg=TXT_DIM,
-                 font=("Segoe UI", 8, "bold"), anchor="w").pack(fill=tk.X, padx=12, pady=(8, 2))
+                 font=F_SECCION, anchor="w").pack(fill=tk.X, padx=14, pady=(14, 4))
 
     # ---------------- Panel de eventos ----------------
 
     def _build_panel_eventos(self, p):
         tk.Label(p, text="EVENTOS DEL PARTIDO", bg=BG_PANEL, fg="white",
-                 font=("Segoe UI", 14, "bold")).pack(pady=(12, 4))
+                 font=F_TITULO).pack(pady=(14, 6))
 
         # Marcador
         self.lbl_marcador = tk.Label(p, text=self.narrador_futbol.marcador_texto(),
-                                     bg=BG_CARD, fg="white", font=("Segoe UI", 15, "bold"),
-                                     pady=8)
-        self.lbl_marcador.pack(fill=tk.X, padx=12, pady=(2, 4))
+                                     bg=BG_CARD, fg="white", font=F_MARCADOR, pady=12)
+        self.lbl_marcador.pack(fill=tk.X, padx=14, pady=(2, 8))
+
+        # Ultimo evento (lo mas importante va arriba)
+        self._titulo_seccion(p, "ULTIMO EVENTO")
+        self.card_evento = tk.Frame(p, bg=BG_CARD, highlightthickness=3,
+                                    highlightbackground=BG_CARD)
+        self.card_evento.pack(fill=tk.X, padx=14)
+        self.lbl_evento_tit = tk.Label(self.card_evento, text="--", bg=BG_CARD, fg="#FBBF24",
+                                       font=F_EVENTO_TIT, anchor="w", justify="left",
+                                       wraplength=WRAP, padx=14)
+        self.lbl_evento_tit.pack(fill=tk.X, pady=(12, 0))
+        self.lbl_evento_txt = tk.Label(self.card_evento, text="", bg=BG_CARD, fg="white",
+                                       font=F_EVENTO_TXT, anchor="nw", justify="left",
+                                       wraplength=WRAP, padx=14, pady=10, height=5)
+        self.lbl_evento_txt.pack(fill=tk.X)
+
+        # Balon
+        self._titulo_seccion(p, "BALON")
+        self.lbl_balon = tk.Label(p, text="--", bg=BG_CARD, fg=TXT, font=F_TEXTO,
+                                  anchor="nw", justify="left", wraplength=WRAP,
+                                  padx=14, pady=10, height=3)
+        self.lbl_balon.pack(fill=tk.X, padx=14)
 
         # Estado de la camara / juego
+        self._titulo_seccion(p, "ESTADO")
         fila = tk.Frame(p, bg=BG_PANEL)
-        fila.pack(fill=tk.X, padx=12)
+        fila.pack(fill=tk.X, padx=14)
         self.lbl_plano = tk.Label(fila, text="Plano: --", bg=BG_PANEL, fg=TXT,
-                                  font=("Segoe UI", 9), anchor="w")
+                                  font=F_ESTADO, anchor="w", justify="left",
+                                  wraplength=WRAP - 90)
         self.lbl_plano.pack(side=tk.LEFT)
-        self.lbl_tiempo = tk.Label(fila, text="00:00", bg=BG_PANEL, fg=TXT_DIM,
-                                   font=("Consolas", 10, "bold"))
+        self.lbl_tiempo = tk.Label(fila, text="00:00", bg=BG_PANEL, fg="white",
+                                   font=("Consolas", 16, "bold"))
         self.lbl_tiempo.pack(side=tk.RIGHT)
 
         # Medidor de celebracion
         fila2 = tk.Frame(p, bg=BG_PANEL)
-        fila2.pack(fill=tk.X, padx=12, pady=(4, 0))
-        tk.Label(fila2, text="Celebracion", bg=BG_PANEL, fg=TXT_DIM,
-                 font=("Segoe UI", 8)).pack(side=tk.LEFT)
-        self.cv_celeb = tk.Canvas(fila2, bg=BG_CARD, height=10, highlightthickness=0)
-        self.cv_celeb.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
-        self.lbl_senales = tk.Label(p, text="", bg=BG_PANEL, fg="#6B7280",
-                                    font=("Segoe UI", 7), anchor="w", justify="left",
-                                    wraplength=PANEL_W - 30)
-        self.lbl_senales.pack(fill=tk.X, padx=12)
-
-        # Balon
-        self._titulo_seccion(p, "BALON")
-        self.lbl_balon = tk.Label(p, text="--", bg=BG_CARD, fg=TXT, font=("Segoe UI", 10),
-                                  anchor="nw", justify="left", wraplength=PANEL_W - 50,
-                                  padx=10, pady=8, height=3)
-        self.lbl_balon.pack(fill=tk.X, padx=12)
-
-        # Ultimo evento
-        self._titulo_seccion(p, "ULTIMO EVENTO")
-        self.card_evento = tk.Frame(p, bg=BG_CARD)
-        self.card_evento.pack(fill=tk.X, padx=12)
-        self.lbl_evento_tit = tk.Label(self.card_evento, text="--", bg=BG_CARD, fg="#FBBF24",
-                                       font=("Segoe UI", 11, "bold"), anchor="w", padx=10)
-        self.lbl_evento_tit.pack(fill=tk.X, pady=(8, 0))
-        self.lbl_evento_txt = tk.Label(self.card_evento, text="", bg=BG_CARD, fg=TXT,
-                                       font=("Segoe UI", 10), anchor="nw", justify="left",
-                                       wraplength=PANEL_W - 50, padx=10, pady=6, height=4)
-        self.lbl_evento_txt.pack(fill=tk.X)
+        fila2.pack(fill=tk.X, padx=14, pady=(8, 0))
+        tk.Label(fila2, text="Celebracion", bg=BG_PANEL, fg=TXT,
+                 font=F_ESTADO).pack(side=tk.LEFT)
+        self.cv_celeb = tk.Canvas(fila2, bg=BG_CARD, height=18, highlightthickness=0)
+        self.cv_celeb.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
+        self.lbl_senales = tk.Label(p, text="", bg=BG_PANEL, fg=TXT_DIM,
+                                    font=F_SENALES, anchor="w", justify="left",
+                                    wraplength=WRAP + 20)
+        self.lbl_senales.pack(fill=tk.X, padx=14, pady=(6, 0))
+        self.lbl_voz = tk.Label(p, text="", bg=BG_PANEL, fg="#34D399",
+                                font=F_SENALES, anchor="w")
+        self.lbl_voz.pack(fill=tk.X, padx=14)
 
         # Historial
         self._titulo_seccion(p, "HISTORIAL")
         marco = tk.Frame(p, bg=BG_PANEL)
-        marco.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 10))
+        marco.pack(fill=tk.X, padx=14, pady=(0, 14))
         barra = tk.Scrollbar(marco)
         barra.pack(side=tk.RIGHT, fill=tk.Y)
-        self.txt_hist = tk.Text(marco, bg=BG_CARD, fg=TXT, font=("Segoe UI", 9), wrap="word",
-                                relief=tk.FLAT, padx=8, pady=6, yscrollcommand=barra.set,
-                                state="disabled", cursor="arrow")
+        self.txt_hist = tk.Text(marco, bg=BG_CARD, fg=TXT, font=F_HIST, wrap="word",
+                                relief=tk.FLAT, padx=12, pady=10, yscrollcommand=barra.set,
+                                state="disabled", cursor="arrow", height=16, spacing1=2,
+                                spacing3=2)
         self.txt_hist.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         barra.config(command=self.txt_hist.yview)
-        self.txt_hist.tag_configure("tiempo", foreground="#6B7280", font=("Consolas", 8))
+        self.txt_hist.tag_configure("tiempo", foreground=TXT_DIM, font=F_HIST_T)
         for tipo, col in COLOR_EVENTO.items():
-            self.txt_hist.tag_configure(tipo, foreground=col, font=("Segoe UI", 9, "bold"))
-        self.txt_hist.tag_configure("motivo", foreground="#6B7280", font=("Segoe UI", 8, "italic"))
+            self.txt_hist.tag_configure(tipo, foreground=col, font=F_HIST_TIPO)
+        self.txt_hist.tag_configure("motivo", foreground=TXT_DIM, font=F_HIST_MOTIVO)
 
     # ---------------- Panel tactico (el de siempre) ----------------
 
@@ -263,7 +343,7 @@ class DetectorFutbol:
                  font=("Segoe UI", 8, "bold"), anchor="w").pack(fill=tk.X, padx=10)
         self.bar_c = tk.Canvas(p, bg=BG_CARD, height=26, highlightthickness=0)
         self.bar_c.pack(fill=tk.X, padx=10, pady=3)
-        self.lbl_pos = tk.Label(p, text="Rojo 50%  vs  Azul 50%", bg=BG_PANEL, fg="white",
+        self.lbl_pos = tk.Label(p, text="--", bg=BG_PANEL, fg="white",
                                 font=("Segoe UI", 10, "bold"), anchor="center")
         self.lbl_pos.pack(fill=tk.X, padx=10)
         self._sep(p)
@@ -271,10 +351,10 @@ class DetectorFutbol:
         ley = tk.Frame(p, bg=BG_PANEL)
         ley.pack(fill=tk.X, padx=10, pady=2)
         tk.Canvas(ley, bg="#DC2626", width=14, height=14, highlightthickness=0).pack(side=tk.LEFT)
-        tk.Label(ley, text=" Equipo A  ", bg=BG_PANEL, fg="#FCA5A5",
+        tk.Label(ley, text=f" {self._nombre(EQUIPO_A)} (rojo)  ", bg=BG_PANEL, fg="#FCA5A5",
                  font=("Segoe UI", 9)).pack(side=tk.LEFT)
         tk.Canvas(ley, bg=ACENTO, width=14, height=14, highlightthickness=0).pack(side=tk.LEFT)
-        tk.Label(ley, text=" Equipo B", bg=BG_PANEL, fg="#93C5FD",
+        tk.Label(ley, text=f" {self._nombre(EQUIPO_B)} (azul)", bg=BG_PANEL, fg="#93C5FD",
                  font=("Segoe UI", 9)).pack(side=tk.LEFT)
         self._sep(p)
 
@@ -284,9 +364,9 @@ class DetectorFutbol:
         cab.pack(fill=tk.X, padx=10, pady=(2, 0))
         tk.Label(cab, text="Metrica", bg=BG_CARD, fg="#6B7280", font=("Segoe UI", 8, "bold"),
                  width=14, anchor="w").grid(row=0, column=0)
-        tk.Label(cab, text="Eq. ROJO", bg=BG_CARD, fg="#F87171", font=("Segoe UI", 8, "bold"),
+        tk.Label(cab, text=self._nombre(EQUIPO_A)[:10], bg=BG_CARD, fg="#F87171", font=("Segoe UI", 8, "bold"),
                  width=9, anchor="center").grid(row=0, column=1)
-        tk.Label(cab, text="Eq. AZUL", bg=BG_CARD, fg="#60A5FA", font=("Segoe UI", 8, "bold"),
+        tk.Label(cab, text=self._nombre(EQUIPO_B)[:10], bg=BG_CARD, fg="#60A5FA", font=("Segoe UI", 8, "bold"),
                  width=9, anchor="center").grid(row=0, column=2)
 
         self._rows = {}
@@ -340,7 +420,9 @@ class DetectorFutbol:
     # =========================================================
 
     def _reiniciar_modulos(self):
-        self.motor = MotorTracking(self.proc_w, self.proc_h)
+        self.motor = MotorTracking(self.proc_w, self.proc_h,
+                                   colores_equipo=self.colores_equipo)
+        self.voz.callar()
         self.detector_eventos.reset()
         self.narrador_futbol.reset()
         self.reconocedor_dorsales.reset()
@@ -377,6 +459,8 @@ class DetectorFutbol:
             return
         self.paused = not self.paused
         self.btn_pausa.config(text=("Reanudar" if self.paused else "Pausa"))
+        if self.paused:
+            self.voz.callar()
         if not self.paused and self.running:
             self.update_video()
 
@@ -474,6 +558,8 @@ class DetectorFutbol:
         texto = self.narrador_futbol.narrar_estado_balon(
             e.get("eq_posesion", 0), self._movimiento_balon(balon), e.get("zona"))
         self.lbl_balon.config(text=texto, fg=TXT)
+        if self.voz.segundos_callada() > SILENCIO_ANTES_DE_RELLENO_S:
+            self.voz.decir(texto, RELLENO)
 
     def registrar_evento(self, evento):
         texto = self.narrador_futbol.narrar(evento)
@@ -499,6 +585,8 @@ class DetectorFutbol:
             w.config(bg=bg)
         self.lbl_evento_tit.config(text=titulo, fg="white" if destacado else col)
         self.lbl_evento_txt.config(text=texto)
+        self.card_evento.config(highlightbackground=col)
+        self.voz.decir(texto, PRIORIDAD_VOZ.get(tipo, EVENTO))
         if destacado:
             self._t_destacado = time.time()
 
@@ -523,6 +611,7 @@ class DetectorFutbol:
         for w in (self.card_evento, self.lbl_evento_tit, self.lbl_evento_txt):
             w.config(bg=BG_CARD)
         self.lbl_evento_tit.config(text="--", fg="#FBBF24")
+        self.card_evento.config(highlightbackground=BG_CARD)
         self.lbl_evento_txt.config(text="")
         self.lbl_balon.config(text="--")
         self.lbl_marcador.config(text=self.narrador_futbol.marcador_texto())
@@ -600,13 +689,14 @@ class DetectorFutbol:
         w = c.winfo_width() or 200
         v = self.momentos.puntaje_celeb
         col = "#F472B6" if self.momentos.celebrando else "#6B7280"
-        c.create_rectangle(0, 0, int(w * min(1.0, v)), 10, fill=col, outline="")
-        c.create_line(int(w * 0.55), 0, int(w * 0.55), 10, fill="#F9FAFB")
+        c.create_rectangle(0, 0, int(w * min(1.0, v)), 18, fill=col, outline="")
+        c.create_line(int(w * 0.55), 0, int(w * 0.55), 18, fill="#F9FAFB", width=2)
 
         activas = [k for k, val in self.momentos.senales.items() if val > 0]
         self.lbl_senales.config(
             text=("Senales: " + (", ".join(activas) if activas else "ninguna")
                   + "\n" + self.momentos.descripcion_senales()))
+        self.lbl_voz.config(text=self.voz.estado_texto())
 
         # El color destacado del GOL / CELEBRACION se apaga a los 4 s
         if self._t_destacado and time.time() - self._t_destacado > 4.0:
@@ -658,7 +748,8 @@ class DetectorFutbol:
         self.lbl_fps.config(text=f"FPS: {self.fps:.1f}")
         pa, pb = e["pos_a"], e["pos_b"]
         self._draw_bar(pa, pb)
-        self.lbl_pos.config(text=f"Rojo {pa}%   vs   Azul {pb}%")
+        self.lbl_pos.config(
+            text=f"{self._nombre(EQUIPO_A)} {pa}%   vs   {self._nombre(EQUIPO_B)} {pb}%")
 
         def s(key, va, vb):
             self._rows[key][0].config(text=str(va))
@@ -673,7 +764,7 @@ class DetectorFutbol:
         s("dist", f"{e['dist_a']:.0f}", f"{e['dist_b']:.0f}")
 
         eq = e.get("eq_posesion", 0)
-        quien = "ROJO Eq.A" if eq == EQUIPO_A else "AZUL Eq.B" if eq == EQUIPO_B else "-- libre"
+        quien = self._nombre(eq) if eq in (EQUIPO_A, EQUIPO_B) else "-- libre"
         self.lbl_quien.config(text=f"En posesion: {quien}")
         self.lbl_cambios.config(text=f"Cambios de posesion: {e['cambios_posesion']}")
         self.lbl_toques.config(text=f"Toques totales: {e['toques']}")
