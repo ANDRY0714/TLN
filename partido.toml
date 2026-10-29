@@ -8,6 +8,9 @@ nombre = "España"
 apodos = ["La Roja", "La Furia Española", "el combinado español"]
 entrenador = "Luis de la Fuente"
 formacion = "4-2-3-1"
+# Colores de camiseta: nombre ("rojo", "celeste"...) o "#RRGGBB".
+# Sirven para saber que cluster de color es cada equipo.
+camiseta = ["rojo"]
 
 [equipos.visitante]
 id = 2
@@ -15,6 +18,7 @@ nombre = "Argentina"
 apodos = ["La Albiceleste", "La Scaloneta", "el conjunto argentino"]
 entrenador = "Lionel Scaloni"
 formacion = "4-4-2"
+camiseta = ["blanco", "celeste"]
 
 # --- JUGADORES DE ESPAÑA (LOCAL) ---
 
