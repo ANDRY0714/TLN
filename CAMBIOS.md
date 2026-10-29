@@ -24,10 +24,12 @@ Los cambios responden a tres problemas:
 | `main.py` | Modificado (v6 → v7) | Panel lateral más ancho, con scroll y letra grande. Lee los colores de camiseta del toml. Integra la voz y la casilla "Voz". Muestra nombres de equipo en el panel táctico. |
 | `tracker_engine.py` | Modificado (v5 → v6) | Nuevo clasificador de equipos `ClasificadorEquipo`, con corrección de luz, histogramas, prototipos y recalibración continua. Votación por ventana en `Track`. Detección de jugadores superpuestos. |
 | `partido.toml` | Modificado | Nueva clave `camiseta` en cada equipo. |
-| `voz.py` | **Nuevo** | Texto a voz con SAPI de Windows y cola con prioridades. |
+| `voz.py` | **Nuevo** | Texto a voz multiplataforma (Piper → SAPI → espeak-ng) y cola con prioridades. |
+| `voces/` | **Nuevo** | Modelo de voz de Piper `es_MX-ald-medium` (~63 MB). |
 | `CAMBIOS.md` | **Nuevo** | Este documento. |
 
-No se agregaron dependencias: la voz usa el sintetizador que ya trae Windows.
+Nueva dependencia: `piper-tts` (voz neuronal local, sin internet). Si no está
+instalada, la voz usa SAPI en Windows o espeak-ng en Linux.
 
 ---
 
@@ -293,7 +295,27 @@ No había voz: los eventos solo se mostraban en el panel.
 ### Ahora
 Cada evento que se escribe en el panel también se **dice en voz alta**.
 
-#### 3.1 Motor de voz
+#### 3.1 Motores de voz
+`voz.py` prueba los motores en este orden y usa el primero que arranque. Los
+motivos de los que se descartan quedan en `VozNarrador.motivos`.
+
+| Orden | Motor | Sistema | Requisitos |
+|---|---|---|---|
+| 1 | **Piper** (`_MotorPiper`) | Windows, Linux, macOS | `pip install piper-tts` + modelo en `voces/` + reproductor (`winsound` en Windows, `afplay` en macOS, `paplay` / `pw-play` / `aplay` en Linux) |
+| 2 | **SAPI** (`_MotorSAPI`) | Solo Windows | Nada |
+| 3 | **espeak-ng** (`_MotorEspeak`) | Linux | `sudo apt install espeak-ng` |
+
+**Piper** es una voz neuronal que corre en la CPU, sin internet. Sintetiza la
+frase a un WAV temporal y lo reproduce. Cortar una frase es detener la
+reproducción. En las pruebas tarda unos 0.3 s en sintetizar 10 s de audio, y
+cargar el modelo al iniciar tarda unos 2.5 s (se hace en el hilo de la voz). La
+voz se elige con `VOZ_PIPER`; si ese modelo no está, se usa cualquier `.onnx`
+de `voces/`. Para descargar otra voz:
+```bash
+python -m piper.download_voices --download-dir voces es_ES-davefx-medium
+```
+
+**SAPI** (respaldo en Windows):
 - Usa **SAPI de Windows** (`System.Speech.Synthesis.SpeechSynthesizer`) a través
   de un proceso de **PowerShell** que queda abierto y recibe las frases por su
   entrada estándar. No hay que instalar nada.
@@ -314,16 +336,19 @@ Cada evento que se escribe en el panel también se **dice en voz alta**.
 Los eventos llegan más rápido de lo que se pueden pronunciar. Por eso no hay
 cola larga: se guarda **una sola frase pendiente**, la más reciente.
 
-| Prioridad | Constante | Qué se dice | Velocidad SAPI | Volumen |
+| Prioridad | Constante | Qué se dice | Piper (ritmo / volumen) | SAPI (velocidad / volumen) |
 |---|---|---|---|---|
-| 0 | `RELLENO` | Estado del balón y `BALON_LIBRE` | 1 | 80 |
-| 1 | `EVENTO` | Pases, cambios de posesión, posesión inicial | 2 | 100 |
-| 2 | `URGENTE` | `GOL`, `CELEBRACION` | 4 | 100 |
+| 0 | `RELLENO` | Estado del balón y `BALON_LIBRE` | 1.0 / 0.8 | 1 / 80 |
+| 1 | `EVENTO` | Pases, cambios de posesión, posesión inicial | 0.92 / 1.0 | 2 / 100 |
+| 2 | `URGENTE` | `GOL`, `CELEBRACION` | 0.82 / 1.0 | 4 / 100 |
+
+(En Piper el ritmo es `length_scale`: menos de 1 habla más rápido.)
 
 - Una frase pendiente solo se reemplaza por otra de prioridad igual o mayor.
-- Un evento **URGENTE corta lo que se esté diciendo**. Como SAPI no se puede
-  interrumpir por stdin, se termina el proceso y se vuelve a crear para la
-  siguiente frase (en las pruebas, el gol se escuchó 1.7 s después).
+- Un evento **URGENTE corta lo que se esté diciendo**. En Piper se detiene la
+  reproducción. Como SAPI no se puede interrumpir por stdin, se termina el
+  proceso y se vuelve a crear para la siguiente frase (en las pruebas, el gol
+  se escuchó 1.7 s después).
 - El **relleno** (narración del balón) solo se dice si la voz lleva más de 4 s
   callada (`SILENCIO_ANTES_DE_RELLENO_S` en `main.py`). Así hay narración
   continua sin tapar los eventos.
@@ -353,15 +378,26 @@ palabras mal pronunciadas, basta con agregarlas ahí.
   (`VozNarrador.set_activa`).
 - La voz **se calla** al pausar, al reiniciar y al abrir otro video.
 - Al cerrar la ventana (`WM_DELETE_WINDOW` → `DetectorFutbol.cerrar`) se
-  termina el proceso de PowerShell.
-- Si no es Windows o el sintetizador falla, la app sigue funcionando sin voz y
-  el panel lo indica (`voz: no disponible` / `voz: error (...)`).
+  cierra el motor de voz.
+- Si ningún motor arranca, la app sigue funcionando sin voz y el panel lo
+  indica (`voz: no disponible` / `voz: error (...)`).
 
 #### 3.5 Prueba rápida de la voz
 ```bash
 python voz.py
 ```
-Dice una frase de ejemplo, la interrumpe con un "gol" e imprime el estado.
+Dice una frase de ejemplo, la interrumpe con un "gol" e imprime el motor usado
+y por qué se descartaron los otros.
+
+#### 3.6 Instalación en Linux Mint
+```bash
+sudo apt install python3-venv python3-tk alsa-utils espeak-ng   # espeak-ng: respaldo
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python voz.py        # debe decir: voz: Piper es_MX-ald-medium
+```
+En Mint 22, `pip install` fuera de un venv da el error
+`externally-managed-environment`; por eso se usa `.venv`.
 
 ---
 
@@ -389,30 +425,26 @@ Dice una frase de ejemplo, la interrumpe con un "gol" e imprime el estado.
   muestras de su color.
 - Puede haber errores aislados con colores parecidos al del rival, por ejemplo
   el portero de verde marcado en rojo en un frame.
-- La voz SAPI suena **robótica**. Es suficiente para empezar a escuchar la
-  narración, pero no es una voz natural.
-- La voz depende de Windows. En otro sistema operativo la app funciona sin voz.
+- Piper suena natural pero con **poca expresividad**: el gol no suena eufórico.
+  SAPI y espeak-ng (respaldos) suenan robóticos.
 
 ---
 
 ## 6. Trabajo futuro: voz más natural
 
-La interfaz de `voz.py` (cola + prioridades) es independiente del motor, así
-que se puede cambiar SAPI por un motor neuronal sin tocar `main.py`:
+La interfaz de `voz.py` (cola + prioridades) es independiente del motor. Para
+agregar un motor basta una clase con `hablar` / `cortar` / `cerrar` en
+`_MOTORES`, sin tocar `main.py`. Piper ya está integrado; otras opciones:
 
 | Opción | Tipo | Ventajas | Inconvenientes |
 |---|---|---|---|
-| **Piper** | Local, CPU | Rápido, gratis, voces en es-MX / es-ES | Expresividad limitada |
 | **XTTS-v2 (Coqui)** | Local, GPU | Muy expresivo, clona una voz con unos segundos de audio | Más lento, licencia no comercial |
 | **edge-tts** | En línea | Voces neuronales de Microsoft (p. ej. `es-MX-JorgeNeural`) | No es un servicio oficial |
 | **Azure / Google / ElevenLabs / OpenAI TTS** | Nube, de pago | Máxima calidad, SSML / estilos emocionales | Requiere cuenta e internet |
 
 Pasos sugeridos:
-1. Definir una interfaz de motor `sintetizar(texto, estilo) → audio`.
-2. Reproducir el audio con `sounddevice` o `pygame`. Así interrumpir sería
-   detener la reproducción, sin terminar procesos.
-3. Usar **SSML** o estilos por tipo de evento: euforia en el gol, tono calmado
+1. Usar **SSML** o estilos por tipo de evento: euforia en el gol, tono calmado
    en los pases.
-4. Generar frases cortas, pensadas para escucharse y no para leerse, y usar
+2. Generar frases cortas, pensadas para escucharse y no para leerse, y usar
    caché para las frases frecuentes, para reducir la latencia.
-5. Opcional: sonido ambiente de estadio que sube de volumen en los goles.
+3. Opcional: sonido ambiente de estadio que sube de volumen en los goles.

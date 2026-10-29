@@ -4,6 +4,7 @@ pillow
 ultralytics
 lap
 # opcionales
+piper-tts           # voz del narrador (modelo en voces/)
 imageio-ffmpeg      # extrae el audio si no tienes ffmpeg instalado
 # faster-whisper    # transcripcion del narrador (USAR_TRANSCRIPCION = True en momentos_clave.py)
 # pytesseract       # OCR de dorsales (requiere Tesseract instalado en Windows)
